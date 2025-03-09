@@ -23,13 +23,31 @@ from manim_voiceover.tracker import AUDIO_OFFSET_RESOLUTION
 def timestamps_to_word_boundaries(segments):
     word_boundaries = []
     current_text_offset = 0
-    for segment in segments:
-        for dict_ in segment["words"]:
+    
+    # Check if we have direct word-level timestamps (from OpenAI API)
+    if isinstance(segments, list) and len(segments) > 0 and "words" in segments[0]:
+        # Process segment-level timestamps
+        for segment in segments:
+            for dict_ in segment["words"]:
+                word = dict_["word"]
+                word_boundaries.append(
+                    {
+                        "audio_offset": int(dict_["start"] * AUDIO_OFFSET_RESOLUTION),
+                        "text_offset": current_text_offset,
+                        "word_length": len(word),
+                        "text": word,
+                        "boundary_type": "Word",
+                    }
+                )
+                current_text_offset += len(word)
+    # Check if we have direct word-level timestamps in a flat structure (from OpenAI API)
+    elif isinstance(segments, list) and len(segments) > 0 and isinstance(segments[0], dict) and "word" in segments[0]:
+        # Process word-level timestamps directly
+        for dict_ in segments:
             word = dict_["word"]
             word_boundaries.append(
                 {
                     "audio_offset": int(dict_["start"] * AUDIO_OFFSET_RESOLUTION),
-                    # "duration_milliseconds": 0,
                     "text_offset": current_text_offset,
                     "word_length": len(word),
                     "text": word,
@@ -37,9 +55,21 @@ def timestamps_to_word_boundaries(segments):
                 }
             )
             current_text_offset += len(word)
-            # If word is not punctuation, add a space
-            # if word not in [".", ",", "!", "?", ";", ":", "(", ")"]:
-            # current_text_offset += 1
+    else:
+        # Original implementation for local Whisper
+        for segment in segments:
+            for dict_ in segment["words"]:
+                word = dict_["word"]
+                word_boundaries.append(
+                    {
+                        "audio_offset": int(dict_["start"] * AUDIO_OFFSET_RESOLUTION),
+                        "text_offset": current_text_offset,
+                        "word_length": len(word),
+                        "text": word,
+                        "boundary_type": "Word",
+                    }
+                )
+                current_text_offset += len(word)
 
     return word_boundaries
 
@@ -114,53 +144,45 @@ class SpeechService(ABC):
                             model="whisper-1",
                             file=audio_file,
                             response_format="verbose_json",
+                            timestamp_granularities=["word"],
                             **self.transcription_kwargs
                         )
                     
-                    # Convert OpenAI API response to the format expected by manim-voiceover
-                    segments = []
-                    for segment in transcription_result.segments:
-                        segment_dict = {
-                            "id": segment.id,
-                            "seek": segment.seek,
-                            "start": segment.start,
-                            "end": segment.end,
-                            "text": segment.text,
-                            "tokens": segment.tokens,
-                            "temperature": segment.temperature,
-                            "avg_logprob": segment.avg_logprob,
-                            "compression_ratio": segment.compression_ratio,
-                            "no_speech_prob": segment.no_speech_prob,
-                            "words": []
-                        }
-                        
-                        # Process word-level timestamps if available
-                        if hasattr(segment, "words"):
-                            for word in segment.words:
-                                segment_dict["words"].append({
-                                    "word": word.word,
-                                    "start": word.start,
-                                    "end": word.end,
-                                    "probability": word.probability
-                                })
-                        
-                        segments.append(segment_dict)
-                    
-                    # Create a result object similar to what local Whisper would return
-                    class CloudWhisperResult:
-                        def __init__(self, text, segments):
-                            self.text = text
-                            self.segments = segments
-                        
-                        def segments_to_dicts(self):
-                            return self.segments
-                    
-                    transcription_result = CloudWhisperResult(
-                        transcription_result.text,
-                        segments
-                    )
-                    
+                    # Convert the word timestamps to word boundaries directly
                     logger.info("Cloud Transcription: " + transcription_result.text)
+                    logger.info(f"Word count: {len(transcription_result.words) if hasattr(transcription_result, 'words') else 0}")
+                    
+                    word_boundaries = []
+                    current_text_offset = 0
+                    
+                    if hasattr(transcription_result, 'words') and transcription_result.words:
+                        logger.info(f"Processing {len(transcription_result.words)} words")
+                        for word_obj in transcription_result.words:
+                            try:
+                                word = word_obj.word
+                                start_time = word_obj.start
+                                
+                                # Create a word boundary entry
+                                word_boundary = {
+                                    "audio_offset": int(start_time * AUDIO_OFFSET_RESOLUTION),
+                                    "text_offset": current_text_offset,
+                                    "word_length": len(word),
+                                    "text": word,
+                                    "boundary_type": "Word",
+                                }
+                                
+                                word_boundaries.append(word_boundary)
+                                current_text_offset += len(word) + 1  # +1 for space
+                                
+                                logger.info(f"Added word boundary: {word} at {start_time}s")
+                            except Exception as e:
+                                logger.error(f"Error processing word: {e}")
+                    else:
+                        logger.warning("No words found in transcription result")
+                    
+                    logger.info(f"Created {len(word_boundaries)} word boundaries")
+                    dict_["word_boundaries"] = word_boundaries
+                    dict_["transcribed_text"] = transcription_result.text
                     
                 except ImportError:
                     logger.error(
@@ -176,12 +198,19 @@ class SpeechService(ABC):
                     str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs
                 )
                 
-            logger.info("Transcription: " + transcription_result.text)
-            word_boundaries = timestamps_to_word_boundaries(
-                transcription_result.segments_to_dicts()
-            )
-            dict_["word_boundaries"] = word_boundaries
-            dict_["transcribed_text"] = transcription_result.text
+                logger.info("Transcription: " + transcription_result.text)
+                
+                # For local Whisper model, use segments_to_dicts
+                if hasattr(transcription_result, 'segments_to_dicts'):
+                    word_boundaries = timestamps_to_word_boundaries(
+                        transcription_result.segments_to_dicts()
+                    )
+                else:
+                    # For OpenAI API response, we already have word boundaries
+                    pass
+                
+                dict_["word_boundaries"] = word_boundaries
+                dict_["transcribed_text"] = transcription_result.text
 
         # Audio callback
         self.audio_callback(original_audio, dict_, **kwargs)
@@ -279,7 +308,7 @@ class SpeechService(ABC):
         raise NotImplementedError
 
     def get_cached_result(self, input_data, cache_dir):
-        json_path = os.path.join(cache_dir / DEFAULT_VOICEOVER_CACHE_JSON_FILENAME)
+        json_path = os.path.join(cache_dir, DEFAULT_VOICEOVER_CACHE_JSON_FILENAME)
         if os.path.exists(json_path):
             json_data = json.load(open(json_path, "r"))
             for entry in json_data:

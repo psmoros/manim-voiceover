@@ -25,10 +25,20 @@ pip install "manim-voiceover[openai]"
 
 ### Command Line Option
 
-You can enable cloud-based Whisper for any Manim render by adding the `--use-cloud-whisper` flag:
+You can enable cloud-based Whisper for any Manim render by using the provided script:
 
 ```bash
-manim -pql --use-cloud-whisper example.py MyScene
+python manim_cloud_whisper.py -pql examples/cloud_whisper_demo.py CloudWhisperDemo
+```
+
+Or by setting an environment variable:
+
+```bash
+# Set the environment variable
+export MANIM_VOICEOVER_USE_CLOUD_WHISPER=1
+
+# Run Manim normally
+manim -pql examples/cloud_whisper_demo.py CloudWhisperDemo
 ```
 
 ### Programmatic Usage

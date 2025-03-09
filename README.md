@@ -47,17 +47,29 @@ Currently supported TTS services (aside from the CLI that allows you to records 
 For ARM64 architectures (like Apple Silicon Macs) or systems where installing the local Whisper model is problematic, you can now use OpenAI's cloud-based Whisper API for speech-to-text alignment:
 
 ```bash
-# Run with cloud-based Whisper
-manim -pql --use-cloud-whisper examples/cloud_whisper_demo.py CloudWhisperDemo
+# Run with the provided script
+python manim_cloud_whisper.py -pql examples/cloud_whisper_demo.py CloudWhisperDemo
 ```
 
 Or enable it programmatically:
 
 ```python
-service = GTTSService(
+service = OpenAIService(
+    voice="alloy",
+    model="tts-1",
     transcription_model="base",
     use_cloud_whisper=True  # This enables cloud-based Whisper
 )
+```
+
+You can also set an environment variable to enable cloud-based Whisper:
+
+```bash
+# Set the environment variable
+export MANIM_VOICEOVER_USE_CLOUD_WHISPER=1
+
+# Run Manim normally
+manim -pql examples/cloud_whisper_demo.py CloudWhisperDemo
 ```
 
 [Learn more about cloud-based Whisper in the documentation.](https://voiceover.manim.community/en/latest/cloud_whisper.html)

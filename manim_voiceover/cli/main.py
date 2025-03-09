@@ -7,44 +7,29 @@ import os
 import sys
 from pathlib import Path
 
-from manim.cli.render.commands import main_command, render
+from manim.cli.render.commands import main_command as original_main_command
+from manim.cli.render.commands import render
 
 from manim_voiceover.cli.config import add_voiceover_args
 
-# Hook into the Manim CLI by monkey patching the main command
+# Store the original command function
 original_render_command = render.command
 
 def patched_render_command(function):
+    """Patch the render command to add our custom arguments."""
     # Call the original decorated function
     cmd = original_render_command(function)
-    
-    # Get the 'params' attribute from the decorated function
-    params = getattr(cmd, 'params', [])
-    
-    # Add our custom arguments to the command line
-    def param_callback(ctx, param, value):
-        # Store the use_cloud_whisper value in the context object
-        ctx.ensure_object(dict)
-        ctx.obj['use_cloud_whisper'] = value
-        return value
     
     # Add our parameter to the command
     from click import option
     cmd = option('--use-cloud-whisper', 
                  is_flag=True, 
-                 help='Use OpenAI cloud API for Whisper instead of local model',
-                 callback=param_callback)(cmd)
+                 help='Use OpenAI cloud API for Whisper instead of local model')(cmd)
     
     return cmd
 
-# Apply our monkey patch
-render.command = patched_render_command
-
-# Also hook into the argparse version of the CLI
-original_main = main_command
-
 def patched_main():
-    """Entry point for renderer."""
+    """Entry point for renderer with cloud whisper support."""
     # Find the render subcommand in the argument parser
     import argparse
     
@@ -61,7 +46,10 @@ def patched_main():
         config.use_cloud_whisper = True
     
     # Call the original main command
-    return original_main()
+    return original_main_command()
 
-# Apply our second monkey patch
-main_command = patched_main 
+# Apply our monkey patch
+render.command = patched_render_command
+
+# No need for this line since we're directly importing and patching in __init__.py
+# main_command = patched_main 
