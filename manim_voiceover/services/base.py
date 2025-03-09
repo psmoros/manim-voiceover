@@ -119,7 +119,7 @@ class SpeechService(ABC):
         self.additional_kwargs = kwargs
 
     def _wrap_generate_from_text(self, text: str, path: str = None, **kwargs) -> dict:
-        # Replace newlines with lines, reduce multiple consecutive spaces to single
+        # Replace newlines with spaces, reduce multiple consecutive spaces to single
         text = " ".join(text.split())
 
         dict_ = self.generate_from_text(text, cache_dir=None, path=path, **kwargs)
@@ -162,7 +162,6 @@ class SpeechService(ABC):
                                 word = word_obj.word
                                 start_time = word_obj.start
                                 
-                                # Create a word boundary entry
                                 word_boundary = {
                                     "audio_offset": int(start_time * AUDIO_OFFSET_RESOLUTION),
                                     "text_offset": current_text_offset,
@@ -193,24 +192,33 @@ class SpeechService(ABC):
                     logger.error(f"Error using cloud-based Whisper: {str(e)}")
                     return dict_
             else:
-                # Use local Whisper model
-                transcription_result = self._whisper_model.transcribe(
-                    str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs
-                )
-                
-                logger.info("Transcription: " + transcription_result.text)
-                
-                # For local Whisper model, use segments_to_dicts
-                if hasattr(transcription_result, 'segments_to_dicts'):
-                    word_boundaries = timestamps_to_word_boundaries(
-                        transcription_result.segments_to_dicts()
-                    )
+                # Use local Whisper model only if it's properly loaded
+                if self._whisper_model is not None and self._whisper_model is not False:
+                    try:
+                        transcription_result = self._whisper_model.transcribe(
+                            str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs
+                        )
+                        
+                        logger.info("Transcription: " + transcription_result.text)
+                        
+                        # For local Whisper model, use segments_to_dicts
+                        if hasattr(transcription_result, 'segments_to_dicts'):
+                            word_boundaries = timestamps_to_word_boundaries(
+                                transcription_result.segments_to_dicts()
+                            )
+                            dict_["word_boundaries"] = word_boundaries
+                            dict_["transcribed_text"] = transcription_result.text
+                        else:
+                            logger.error("Local Whisper model returned unexpected result format.")
+                            return dict_
+                    except Exception as e:
+                        logger.error(f"Error using local Whisper model: {str(e)}")
+                        return dict_
                 else:
-                    # For OpenAI API response, we already have word boundaries
-                    pass
-                
-                dict_["word_boundaries"] = word_boundaries
-                dict_["transcribed_text"] = transcription_result.text
+                    logger.error(
+                        "Local Whisper model is not available. Please set use_cloud_whisper=True or install the local model with `pip install \"manim-voiceover[transcribe]\"`."
+                    )
+                    return dict_
 
         # Audio callback
         self.audio_callback(original_audio, dict_, **kwargs)
@@ -237,7 +245,7 @@ class SpeechService(ABC):
             Path(self.cache_dir) / DEFAULT_VOICEOVER_CACHE_JSON_FILENAME, dict_
         )
         return dict_
-
+    
     def set_transcription(self, model: str = None, kwargs: dict = {}):
         """Set the transcription model and keyword arguments to be passed
         to the transcribe() function.
