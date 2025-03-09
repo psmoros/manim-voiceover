@@ -81,25 +81,24 @@ class SpeechService(ABC):
         self,
         global_speed: float = 1.00,
         cache_dir: t.Optional[str] = None,
-        transcription_model: t.Optional[str] = None,
+        transcription_model: t.Optional[str] = "whisper-1",
         transcription_kwargs: dict = {},
-        use_cloud_whisper: bool = False,
+        use_cloud_whisper: bool = True,
         **kwargs,
     ):
-        """
+        """Initialize the speech service.
+
         Args:
-            global_speed (float, optional): The speed at which to play the audio.
-                Defaults to 1.00.
-            cache_dir (str, optional): The directory to save the audio
-                files to. Defaults to ``voiceovers/``.
-            transcription_model (str, optional): The
-                `OpenAI Whisper model <https://github.com/openai/whisper#available-models-and-languages>`_
-                to use for transcription. Defaults to None.
-            transcription_kwargs (dict, optional): Keyword arguments to
-                pass to the transcribe() function. Defaults to {}.
+            global_speed (float, optional): The global speed factor for the
+                generated audio. Defaults to 1.00.
+            cache_dir (t.Optional[str], optional): The directory where the
+                generated audio will be cached. Defaults to None.
+            transcription_model (t.Optional[str], optional): The Whisper model
+                to use for transcription. Defaults to "whisper-1".
+            transcription_kwargs (dict, optional): Keyword arguments to pass
+                to the transcribe() function. Defaults to {}.
             use_cloud_whisper (bool, optional): Whether to use OpenAI's cloud-based
-                Whisper API for transcription instead of the local model. Useful for
-                ARM64 architectures where local Whisper may not work. Defaults to False.
+                Whisper API for transcription instead of the local model. Defaults to True.
         """
         self.global_speed = global_speed
 
@@ -159,8 +158,12 @@ class SpeechService(ABC):
                         logger.info(f"Processing {len(transcription_result.words)} words")
                         for word_obj in transcription_result.words:
                             try:
-                                word = word_obj.word
+                                word = word_obj.word.strip()  # Remove any leading/trailing whitespace
                                 start_time = word_obj.start
+                                
+                                # Skip words that are just punctuation or empty
+                                if not word or word.isspace() or (len(word) == 1 and not word.isalnum()):
+                                    continue
                                 
                                 word_boundary = {
                                     "audio_offset": int(start_time * AUDIO_OFFSET_RESOLUTION),
@@ -193,7 +196,7 @@ class SpeechService(ABC):
                     return dict_
             else:
                 # Use local Whisper model only if it's properly loaded
-                if self._whisper_model is not None and self._whisper_model is not False:
+                if self._whisper_model is not None and not isinstance(self._whisper_model, bool):
                     try:
                         transcription_result = self._whisper_model.transcribe(
                             str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs

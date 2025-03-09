@@ -8,4 +8,4 @@ __version__: str = pkg_resources.get_distribution(__name__).version
 
 # Add our custom config attribute
 if not hasattr(config, 'use_cloud_whisper'):
-    config.use_cloud_whisper = False
+    config.use_cloud_whisper = True

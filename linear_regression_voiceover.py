@@ -10,7 +10,7 @@ class LinearRegressionWithVoiceover(VoiceoverScene):
         # Initialize OpenAI speech service with cloud whisper
         service = OpenAIService(
             voice="alloy",  # Available voices: alloy, echo, fable, onyx, nova, shimmer
-            model="tts-1",  # tts-1 or tts-1-hd
+            model="tts-1"
         )
         self.set_speech_service(service)
         

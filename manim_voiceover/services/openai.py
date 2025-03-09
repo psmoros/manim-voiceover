@@ -124,6 +124,7 @@ class OpenAIService(SpeechService):
             "input_text": text,
             "input_data": input_data,
             "original_audio": audio_path,
+            "final_audio": audio_path,
         }
 
         return json_dict
