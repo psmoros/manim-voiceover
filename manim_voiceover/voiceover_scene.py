@@ -35,6 +35,10 @@ class VoiceoverScene(Scene):
             create_subcaption (bool, optional): Whether to create subcaptions for the scene. Defaults to True. If `config.save_last_frame` is True, the argument is
             ignored and no subcaptions will be created.
         """
+        # Set use_cloud_whisper from the config if it has the attribute
+        if hasattr(config, "use_cloud_whisper"):
+            speech_service.use_cloud_whisper = config.use_cloud_whisper
+            
         self.speech_service = speech_service
         self.current_tracker = None
         if config.save_last_frame:

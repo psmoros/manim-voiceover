@@ -53,6 +53,7 @@ class SpeechService(ABC):
         cache_dir: t.Optional[str] = None,
         transcription_model: t.Optional[str] = None,
         transcription_kwargs: dict = {},
+        use_cloud_whisper: bool = False,
         **kwargs,
     ):
         """
@@ -66,6 +67,9 @@ class SpeechService(ABC):
                 to use for transcription. Defaults to None.
             transcription_kwargs (dict, optional): Keyword arguments to
                 pass to the transcribe() function. Defaults to {}.
+            use_cloud_whisper (bool, optional): Whether to use OpenAI's cloud-based
+                Whisper API for transcription instead of the local model. Useful for
+                ARM64 architectures where local Whisper may not work. Defaults to False.
         """
         self.global_speed = global_speed
 
@@ -79,6 +83,7 @@ class SpeechService(ABC):
 
         self.transcription_model = None
         self._whisper_model = None
+        self.use_cloud_whisper = use_cloud_whisper
         self.set_transcription(model=transcription_model, kwargs=transcription_kwargs)
 
         self.additional_kwargs = kwargs
@@ -92,9 +97,85 @@ class SpeechService(ABC):
 
         # Check whether word boundaries exist and if not run stt
         if "word_boundaries" not in dict_ and self._whisper_model is not None:
-            transcription_result = self._whisper_model.transcribe(
-                str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs
-            )
+            if self.use_cloud_whisper:
+                # Use OpenAI's cloud-based Whisper API
+                try:
+                    import openai
+                    from dotenv import find_dotenv, load_dotenv
+                    load_dotenv(find_dotenv(usecwd=True))
+                    
+                    if os.getenv("OPENAI_API_KEY") is None:
+                        from manim_voiceover.services.openai import create_dotenv_openai
+                        create_dotenv_openai()
+                    
+                    audio_file_path = str(Path(self.cache_dir) / original_audio)
+                    with open(audio_file_path, "rb") as audio_file:
+                        transcription_result = openai.audio.transcriptions.create(
+                            model="whisper-1",
+                            file=audio_file,
+                            response_format="verbose_json",
+                            **self.transcription_kwargs
+                        )
+                    
+                    # Convert OpenAI API response to the format expected by manim-voiceover
+                    segments = []
+                    for segment in transcription_result.segments:
+                        segment_dict = {
+                            "id": segment.id,
+                            "seek": segment.seek,
+                            "start": segment.start,
+                            "end": segment.end,
+                            "text": segment.text,
+                            "tokens": segment.tokens,
+                            "temperature": segment.temperature,
+                            "avg_logprob": segment.avg_logprob,
+                            "compression_ratio": segment.compression_ratio,
+                            "no_speech_prob": segment.no_speech_prob,
+                            "words": []
+                        }
+                        
+                        # Process word-level timestamps if available
+                        if hasattr(segment, "words"):
+                            for word in segment.words:
+                                segment_dict["words"].append({
+                                    "word": word.word,
+                                    "start": word.start,
+                                    "end": word.end,
+                                    "probability": word.probability
+                                })
+                        
+                        segments.append(segment_dict)
+                    
+                    # Create a result object similar to what local Whisper would return
+                    class CloudWhisperResult:
+                        def __init__(self, text, segments):
+                            self.text = text
+                            self.segments = segments
+                        
+                        def segments_to_dicts(self):
+                            return self.segments
+                    
+                    transcription_result = CloudWhisperResult(
+                        transcription_result.text,
+                        segments
+                    )
+                    
+                    logger.info("Cloud Transcription: " + transcription_result.text)
+                    
+                except ImportError:
+                    logger.error(
+                        'Missing packages. Run `pip install "manim-voiceover[openai]"` to use cloud-based Whisper.'
+                    )
+                    return dict_
+                except Exception as e:
+                    logger.error(f"Error using cloud-based Whisper: {str(e)}")
+                    return dict_
+            else:
+                # Use local Whisper model
+                transcription_result = self._whisper_model.transcribe(
+                    str(Path(self.cache_dir) / original_audio), **self.transcription_kwargs
+                )
+                
             logger.info("Transcription: " + transcription_result.text)
             word_boundaries = timestamps_to_word_boundaries(
                 transcription_result.segments_to_dicts()
@@ -138,23 +219,37 @@ class SpeechService(ABC):
         """
         if model != self.transcription_model:
             if model is not None:
-                try:
-                    import whisper as __tmp
-                    import stable_whisper as whisper
-                except ImportError:
-                    logger.error(
-                        'Missing packages. Run `pip install "manim-voiceover[transcribe]"` to be able to transcribe voiceovers.'
-                    )
+                if self.use_cloud_whisper:
+                    # For cloud-based Whisper, we don't need to load a local model
+                    # but we still need the OpenAI package
+                    try:
+                        import openai
+                        self._whisper_model = True  # Just a placeholder to indicate we have a model
+                    except ImportError:
+                        logger.error(
+                            'Missing packages. Run `pip install "manim-voiceover[openai]"` to use cloud-based Whisper.'
+                        )
+                        self._whisper_model = None
+                else:
+                    # Load local Whisper model
+                    try:
+                        import whisper as __tmp
+                        import stable_whisper as whisper
+                    except ImportError:
+                        logger.error(
+                            'Missing packages. Run `pip install "manim-voiceover[transcribe]"` to be able to transcribe voiceovers.'
+                        )
 
-                prompt_ask_missing_extras(
-                    ["whisper", "stable_whisper"],
-                    "transcribe",
-                    "SpeechService.set_transcription()",
-                )
-                self._whisper_model = whisper.load_model(model)
+                    prompt_ask_missing_extras(
+                        ["whisper", "stable_whisper"],
+                        "transcribe",
+                        "SpeechService.set_transcription()",
+                    )
+                    self._whisper_model = whisper.load_model(model)
             else:
                 self._whisper_model = None
 
+        self.transcription_model = model
         self.transcription_kwargs = kwargs
 
     def get_audio_basename(self, data: dict) -> str:
