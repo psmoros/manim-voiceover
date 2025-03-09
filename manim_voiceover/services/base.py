@@ -126,7 +126,7 @@ class SpeechService(ABC):
         original_audio = dict_["original_audio"]
 
         # Check whether word boundaries exist and if not run stt
-        if "word_boundaries" not in dict_ and self._whisper_model is not None:
+        if "word_boundaries" not in dict_ and (self._whisper_model is not None or self.use_cloud_whisper):
             if self.use_cloud_whisper:
                 # Use OpenAI's cloud-based Whisper API
                 try:
@@ -246,14 +246,17 @@ class SpeechService(ABC):
             model (str, optional): The Whisper model to use for transcription. Defaults to None.
             kwargs (dict, optional): Keyword arguments to pass to the transcribe() function. Defaults to {}.
         """
-        if model != self.transcription_model:
+        self.transcription_model = model
+        self.transcription_kwargs = kwargs
+        
+        if model != self.transcription_model or self._whisper_model is None:
             if model is not None:
                 if self.use_cloud_whisper:
                     # For cloud-based Whisper, we don't need to load a local model
                     # but we still need the OpenAI package
                     try:
                         import openai
-                        self._whisper_model = True  # Just a placeholder to indicate we have a model
+                        self._whisper_model = True  # Just a placeholder to indicate we can use cloud whisper
                     except ImportError:
                         logger.error(
                             'Missing packages. Run `pip install "manim-voiceover[openai]"` to use cloud-based Whisper.'
@@ -277,9 +280,6 @@ class SpeechService(ABC):
                     self._whisper_model = whisper.load_model(model)
             else:
                 self._whisper_model = None
-
-        self.transcription_model = model
-        self.transcription_kwargs = kwargs
 
     def get_audio_basename(self, data: dict) -> str:
         dumped_data = json.dumps(data)

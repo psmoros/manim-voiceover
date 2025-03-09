@@ -11,8 +11,6 @@ class LinearRegressionWithVoiceover(VoiceoverScene):
         service = OpenAIService(
             voice="alloy",  # Available voices: alloy, echo, fable, onyx, nova, shimmer
             model="tts-1",  # tts-1 or tts-1-hd
-            transcription_model="base",
-            use_cloud_whisper=True  # This enables cloud-based Whisper
         )
         self.set_speech_service(service)
         
